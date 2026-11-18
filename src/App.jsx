@@ -224,7 +224,14 @@ export default function App() {
 
         <section className="editor-card" aria-label="SQL editor">
           <div className="card-heading"><div className="card-title"><span className="section-icon editor-icon">{`{ }`}</span><span>SQL editor</span><span className="editor-tag">query.sql</span></div><span className="dialect">SQLite dialect</span></div>
-          <div className="editor-body"><div className="line-numbers" aria-hidden="true">{query.split('\n').map((_, index) => <span key={index}>{index + 1}</span>)}</div><textarea ref={editorRef} value={query} onChange={event => { setQuery(event.target.value); setActiveExample(-1) }} onKeyDown={handleEditorKey} spellCheck="false" aria-label="SQL query" placeholder="SELECT * FROM customers;" /></div>
+          <div className="editor-body">
+            <div className="editor-lines" aria-hidden="true">
+              {query.split('\n').map((line, index) => (
+                <div className="editor-line" key={index} data-line={index + 1}>{line || '\u200b'}</div>
+              ))}
+            </div>
+            <textarea ref={editorRef} value={query} wrap="soft" onChange={event => { setQuery(event.target.value); setActiveExample(-1) }} onKeyDown={handleEditorKey} spellCheck="false" aria-label="SQL query" placeholder="SELECT * FROM customers;" />
+          </div>
           <div className="editor-footer"><span>Run any SQLite statement, including CREATE TABLE and INSERT.</span><button className="run-button" onClick={execute} disabled={!ready || !query.trim()}><Icon name="play" size={17} /> Run query <span className="shortcut">⌘ ↵</span></button></div>
         </section>
 
