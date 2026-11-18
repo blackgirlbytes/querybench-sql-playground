@@ -31,16 +31,16 @@ export function freshDatabase() {
 
 export function saveDatabase(db) {
   const bytes = db.export()
+  db.run('PRAGMA foreign_keys = ON')
   let binary = ''
   for (let offset = 0; offset < bytes.length; offset += 8192) {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + 8192))
   }
   localStorage.setItem(STORAGE_KEY, btoa(binary))
-  db.run('PRAGMA foreign_keys = ON')
 }
 
 export function getTables(db) {
-  const names = db.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")[0]?.values.map(row => row[0]) || []
+  const names = db.exec("SELECT name FROM sqlite_master WHERE type = 'table' AND lower(name) NOT GLOB 'sqlite_*' ORDER BY name")[0]?.values.map(row => row[0]) || []
   return names.map(name => ({
     name,
     columns: db.exec(`PRAGMA table_info(${quoteIdentifier(name)})`)[0]?.values.map(row => ({ name: row[1], type: row[2], primaryKey: Boolean(row[5]) })) || [],
@@ -50,10 +50,25 @@ export function getTables(db) {
 
 export { quoteIdentifier }
 
+function executeStatements(db, sql) {
+  const sets = []
+  for (const statement of db.iterateStatements(sql)) {
+    const columns = statement.getColumnNames()
+    const values = []
+    while (statement.step()) values.push(statement.get())
+    if (columns.length) sets.push({ columns, values })
+  }
+  return sets
+}
+
+export function previewTable(db, name) {
+  return executeStatements(db, `SELECT * FROM ${quoteIdentifier(name)} LIMIT 10`)[0]
+}
+
 export function runQuery(db, sql) {
   const before = db.getRowsModified()
   const started = performance.now()
-  const sets = db.exec(sql)
+  const sets = executeStatements(db, sql)
   const elapsed = Math.round(performance.now() - started)
   const changed = db.getRowsModified() || before
   saveDatabase(db)

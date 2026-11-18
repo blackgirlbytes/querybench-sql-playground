@@ -8,7 +8,7 @@ From the repository root:
 
 ```bash
 npm install
-npm run dev:sql
+npm run dev
 ```
 
 Open the local URL printed by Vite.
@@ -18,8 +18,17 @@ Open the local URL printed by Vite.
 - Start with four related tables: `customers`, `products`, `orders`, and `order_items`.
 - Write and run any SQLite query. Use `⌘/Ctrl + Enter` as a shortcut.
 - Inspect query results and table structure. SQL errors appear beside the results.
-- Choose a table and a row count under **Data generator**, then click **Generate data**. The generator uses column names and types to make sample values and selects existing keys for foreign key columns.
-- Create your own table with a `CREATE TABLE` statement, then select it in the generator. Add referenced parent rows before generating child rows.
+- Choose **Create a table**, enter a name, and define its columns. Generate sample rows using automatic values, lists of choices, or numeric ranges.
+- For an exact dataset, choose **Paste exact rows** and paste CSV with a header. The playground uses the headers as column names and infers their types. For example, paste the following into a new table named `race_results`.
+
+  ```csv
+  runner,event,finish_seconds
+  Ari,100m,12.4
+  Morgan,100m,11.9
+  Ari,200m,25.1
+  ```
+
+- To add another batch, select your table and click **Generate data**. **Customize rows** lets you edit its generation rules or append exact rows. You can also create tables in the SQL editor.
 - Changes are saved in this browser's local storage. **Reset database** restores the starter data.
 
 The generator handles common columns and SQLite foreign keys. Tables with special constraints may require manual INSERT statements.
@@ -36,6 +45,6 @@ Browser data is stored in each visitor's own local storage. It does not sync bet
 ## Verify
 
 ```bash
-npm test -w sql-playground
-npm run build -w sql-playground
+npm test
+npm run build
 ```

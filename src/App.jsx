@@ -1,9 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import { examples } from './sample.js'
-import { freshDatabase, getTables, openDatabase, quoteIdentifier, runQuery, saveDatabase } from './database.js'
-import { generateRows } from './generate.js'
+import { freshDatabase, getTables, openDatabase, quoteIdentifier, runQuery, saveDatabase, previewTable } from './database.js'
+import { applyDataset } from './generate.js'
+import DataBuilder from './DataBuilder.jsx'
 
 const initialQuery = examples[0].sql
+const preferencesKey = 'querybench-table-preferences-v1'
+
+function readPreferences() {
+  try {
+    return JSON.parse(localStorage.getItem(preferencesKey)) || {}
+  } catch {
+    return {}
+  }
+}
+
+function previewSql(name) {
+  return name ? `SELECT *\nFROM ${quoteIdentifier(name)}\nLIMIT 10;` : ''
+}
 
 function Icon({ name, size = 18 }) {
   const paths = {
@@ -32,6 +46,9 @@ export default function App() {
   const [query, setQuery] = useState(initialQuery)
   const [tables, setTables] = useState([])
   const [selectedTable, setSelectedTable] = useState('customers')
+  const [builder, setBuilder] = useState(null)
+  const [preferences, setPreferences] = useState(readPreferences)
+  const [saved, setSaved] = useState(true)
   const [rowCount, setRowCount] = useState(25)
   const [result, setResult] = useState(null)
   const [message, setMessage] = useState(null)
@@ -43,6 +60,7 @@ export default function App() {
     const next = getTables(db)
     setTables(next)
     setSelectedTable(current => next.some(table => table.name === current) ? current : (next[0]?.name || ''))
+    return next
   }
 
   useEffect(() => {
@@ -50,10 +68,15 @@ export default function App() {
     openDatabase().then(db => {
       if (!mounted) { db.close(); return }
       dbRef.current = db
-      refresh(db)
-      const data = db.exec(initialQuery)[0]
-      setResult(data || null)
-      setMessage({ type: 'success', text: 'Starter database ready', detail: 'Run a query or pick an example.' })
+      const available = refresh(db)
+      const preferred = readPreferences().selectedTable
+      const first = available.find(table => table.name === preferred)
+        || available.find(table => table.name === 'customers') || available[0]
+      setSelectedTable(first?.name || '')
+      setQuery(first?.name === 'customers' ? initialQuery : previewSql(first?.name))
+      setActiveExample(first?.name === 'customers' ? 0 : -1)
+      setResult(first ? previewTable(db, first.name) : null)
+      setMessage({ type: 'success', text: 'Database ready', detail: first ? `Previewing ${first.name}.` : 'Create a table to start practicing.' })
       setReady(true)
     }).catch(error => setMessage({ type: 'error', text: 'Database could not load', detail: error.message }))
     return () => { mounted = false }
@@ -80,15 +103,48 @@ export default function App() {
     }
   }
 
+  const initialRules = Object.fromEntries(tables.flatMap(table => {
+    const entry = Object.hasOwn(preferences.recipes || {}, table.name) && preferences.recipes[table.name]
+    return entry && entry.schema === JSON.stringify(table.columns) ? [[table.name, entry.rules]] : []
+  }))
+
+  function datasetComplete({ tableName, count, created, rules }) {
+    const db = dbRef.current
+    const available = refresh(db)
+    const updated = available.find(table => table.name === tableName)
+    const recipes = Object.assign(Object.create(null), preferences.recipes)
+    if (created) delete recipes[tableName]
+    if (rules && updated) {
+      recipes[tableName] = { schema: JSON.stringify(updated.columns), rules }
+    }
+    const next = { selectedTable: tableName, recipes }
+    setPreferences(next)
+    setSelectedTable(tableName)
+    setResult(previewTable(db, tableName))
+    if (created || query === initialQuery || !query.trim()) {
+      setQuery(previewSql(tableName))
+      setActiveExample(-1)
+    }
+    setPanel('results')
+    setBuilder(null)
+    const noun = count === 1 ? 'row' : 'rows'
+    const heading = created ? `Created ${tableName} with ${count} ${noun}` : `Added ${count} ${noun} to ${tableName}`
+    try {
+      saveDatabase(db)
+      localStorage.setItem(preferencesKey, JSON.stringify(next))
+      setSaved(true)
+      setMessage({ type: 'success', text: heading, detail: `Previewing up to 10 rows from ${tableName}.` })
+    } catch {
+      setSaved(false)
+      setMessage({ type: 'error', text: heading, detail: 'Browser storage is unavailable or full. This session has your changes, but reloading may lose them.' })
+    }
+  }
+
   function addRows() {
     try {
-      const count = generateRows(dbRef.current, selectedTable, Number(rowCount))
-      saveDatabase(dbRef.current)
-      refresh(dbRef.current)
-      const data = dbRef.current.exec(`SELECT * FROM ${quoteIdentifier(selectedTable)} ORDER BY rowid DESC LIMIT 10`)[0]
-      setResult(data || null)
-      setPanel('results')
-      setMessage({ type: 'success', text: `${count} rows added to ${selectedTable}`, detail: 'Showing the 10 newest rows below.' })
+      const rules = Object.hasOwn(initialRules, selectedTable) ? initialRules[selectedTable] : undefined
+      const count = applyDataset(dbRef.current, { tableName: selectedTable, count: Number(rowCount), rules })
+      datasetComplete({ tableName: selectedTable, count })
     } catch (error) {
       setMessage({ type: 'error', text: 'Could not generate rows', detail: error.message })
       setPanel('results')
@@ -101,6 +157,10 @@ export default function App() {
     dbRef.current = db
     refresh(db)
     setQuery(initialQuery)
+    setSelectedTable('customers')
+    setPreferences({})
+    localStorage.removeItem(preferencesKey)
+    setSaved(true)
     setResult(db.exec(initialQuery)[0] || null)
     setMessage({ type: 'success', text: 'Starter data restored', detail: 'Your saved database was replaced.' })
     setShowReset(false)
@@ -134,7 +194,7 @@ export default function App() {
   return <div className="app-shell">
     <header className="topbar">
       <div className="brand"><div className="brand-mark"><span>Q</span><i /></div><div><strong>Querybench</strong><small>SQL interview practice</small></div></div>
-      <div className="topbar-right"><span className="engine-pill"><span className="engine-dot" /> SQLite in your browser</span><span className="save-note">Auto-saved locally</span></div>
+      <div className="topbar-right"><span className="engine-pill"><span className="engine-dot" /> SQLite in your browser</span><span className="save-note">{saved ? 'Auto-saved locally' : 'Changes in this session only'}</span></div>
     </header>
 
     <div className="workspace">
@@ -145,7 +205,7 @@ export default function App() {
           {tables.map(table => <button key={table.name} className={`table-item ${selectedTable === table.name ? 'selected' : ''}`} onClick={() => { setSelectedTable(table.name); setPanel('schema') }}>
             <span className="table-icon"><Icon name="database" size={16} /></span><span className="table-name">{table.name}</span><span className="table-count">{table.count}</span>
           </button>)}
-          {!tables.length && <p className="empty-tables">No tables yet. Run a CREATE TABLE statement to get started.</p>}
+          {!tables.length && <p className="empty-tables">Create your first table to get started.</p>}
         </div>
         <div className="sidebar-divider" />
         <div className="sidebar-heading examples-heading"><span>QUERY EXAMPLES</span></div>
@@ -154,7 +214,13 @@ export default function App() {
       </aside>
 
       <main className="main-area">
-        <div className="intro-row"><div><div className="eyebrow">THE WORKSPACE</div><h1>Think in queries.</h1><p>Write SQL, inspect the data, and see what happens.</p></div><button className="reset-button" onClick={() => setShowReset(true)}><Icon name="reset" size={16} /> Reset database</button></div>
+        <div className="intro-row">
+          <div><h1>SQL playground</h1><p>Create your own data or practice with the starter tables.</p></div>
+          <div className="workspace-actions">
+            <button className="create-table-button" onClick={() => setBuilder('new')} disabled={!ready}><Icon name="plus" size={17} /> Create a table</button>
+            <button className="reset-button" aria-label="Reset database" title="Reset database" onClick={() => setShowReset(true)} disabled={!ready}><Icon name="reset" size={16} /></button>
+          </div>
+        </div>
 
         <section className="editor-card" aria-label="SQL editor">
           <div className="card-heading"><div className="card-title"><span className="section-icon editor-icon">{`{ }`}</span><span>SQL editor</span><span className="editor-tag">query.sql</span></div><span className="dialect">SQLite dialect</span></div>
@@ -172,12 +238,13 @@ export default function App() {
       </main>
 
       <aside className="generator-panel">
-        <div className="generator-top"><div className="generator-emblem"><Icon name="plus" size={20} /></div><span className="generator-kicker">DATA GENERATOR</span><h2>Need more rows?</h2><p>Fill any table with realistic practice data in a click. Foreign keys point to existing records.</p></div>
+        <div className="generator-top"><h2>Generate data</h2><p>Add a batch of rows to your table. Choose “Customize rows” to set value ranges, list choices, or enter exact rows.</p></div>
         <div className="generator-form"><label htmlFor="table-select">TABLE</label><div className="select-wrap"><select id="table-select" value={selectedTable} onChange={event => setSelectedTable(event.target.value)} disabled={!tables.length}>{tables.map(table => <option key={table.name} value={table.name}>{table.name}</option>)}</select><Icon name="chevron" size={16} /></div><label htmlFor="row-count">NUMBER OF ROWS</label><input id="row-count" type="number" min="1" max="1000" value={rowCount} onChange={event => setRowCount(event.target.value)} /><span className="form-hint">1–1,000 rows per batch</span><button className="generate-button" onClick={addRows} disabled={!ready || !selectedTable}><Icon name="plus" size={18} /> Generate data</button></div>
-        <div className="generator-note"><span className="note-icon">✦</span><p>Tip: create your own table with SQL, then select it here to generate rows for it.</p></div>
+        <button className="customize-rows-button" disabled={!ready || !selectedTable} onClick={() => setBuilder('existing')}>Customize rows</button>
       </aside>
     </div>
 
+    {builder && <DataBuilder db={dbRef.current} tables={tables} selectedTable={selectedTable} initialDestination={builder} initialRules={initialRules} onClose={() => setBuilder(null)} onComplete={datasetComplete} />}
     {showReset && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setShowReset(false) }}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="reset-title"><div className="modal-icon"><Icon name="reset" size={22} /></div><h2 id="reset-title">Reset the database?</h2><p>This replaces your current tables and rows with the original practice data.</p><div className="modal-actions"><button onClick={() => setShowReset(false)}>Cancel</button><button className="confirm-reset" onClick={reset}>Reset database</button></div></div></div>}
   </div>
 }
