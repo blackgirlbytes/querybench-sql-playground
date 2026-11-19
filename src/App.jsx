@@ -3,6 +3,7 @@ import { examples } from './sample.js'
 import { freshDatabase, getTables, openDatabase, quoteIdentifier, runQuery, saveDatabase, previewTable } from './database.js'
 import { applyDataset } from './generate.js'
 import DataBuilder from './DataBuilder.jsx'
+import TableComparison from './TableComparison.jsx'
 
 const initialQuery = examples[0].sql
 const preferencesKey = 'querybench-table-preferences-v1'
@@ -297,6 +298,8 @@ export default function App() {
           </div>
         </section>
 
+        <TableComparison db={dbRef.current} tables={tables} formatCell={formatCell} />
+
         <section className="data-card" aria-label="Results and schema">
           <div className="data-tabs">
             <div className="tabs">
@@ -314,14 +317,16 @@ export default function App() {
               <summary>SQL from selection</summary>
               <pre>{message.snippet}</pre>
             </details>}
-            {results.map((result, i) => {
-              let label = ''
-              if (result.runNumber && (results.length > 1 || keepResults)) {
-                label = `Statement ${result.statementNumber}`
-                if (results.at(-1).runNumber > 1) label = `Run ${result.runNumber} · ${label}`
-              }
-              return <ResultTable key={i} result={result} label={label} />
-            })}
+            <div className={results.length > 1 ? 'result-comparison-grid' : undefined}>
+              {results.map((result, i) => {
+                let label = ''
+                if (result.runNumber && (results.length > 1 || keepResults)) {
+                  label = `Statement ${result.statementNumber}`
+                  if (results.at(-1).runNumber > 1) label = `Run ${result.runNumber} · ${label}`
+                }
+                return <ResultTable key={i} result={result} label={label} />
+              })}
+            </div>
             {!results.length && <div className="empty-results">Run a SELECT query to see rows here.</div>}
           </> : <div className="schema-content">{currentTable ? <><div className="schema-intro"><strong>{currentTable.name}</strong><span>{currentTable.count} rows · {currentTable.columns.length} columns</span></div><div className="schema-table"><div className="schema-head"><span>COLUMN</span><span>TYPE</span><span>KEY</span></div>{currentTable.columns.map(column => <div className="schema-row" key={column.name}><code>{column.name}</code><span>{column.type || 'ANY'}</span><span>{column.primaryKey ? 'Primary' : '—'}</span></div>)}</div></> : <div className="empty-results">Choose a table to view its columns.</div>}</div>}
         </section>

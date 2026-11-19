@@ -70,8 +70,9 @@ function executeStatements(db, sql) {
   return sets
 }
 
-export function previewTable(db, name) {
-  return executeStatements(db, `SELECT * FROM ${quoteIdentifier(name)} LIMIT 10`)[0]
+export function previewTable(db, name, offset = 0) {
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new RangeError('Invalid table preview offset.')
+  return executeStatements(db, `SELECT * FROM ${quoteIdentifier(name)} LIMIT 10 OFFSET ${offset}`)[0]
 }
 
 export function runQuery(db, sql) {

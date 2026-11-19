@@ -138,3 +138,17 @@
   .data-tabs .tabs { min-height: 45px; }
   .keep-results { padding: 6px 0; }
 }
+
+.result-comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
+  gap: 12px;
+  padding: 0 16px 16px;
+  align-items: start;
+}
+.result-comparison-grid > .query-result {
+  min-width: 0;
+  border: 1px solid #dbe5f1;
+  border-radius: 8px;
+  overflow: hidden;
+}
