@@ -52,11 +52,20 @@ export { quoteIdentifier }
 
 function executeStatements(db, sql) {
   const sets = []
-  for (const statement of db.iterateStatements(sql)) {
-    const columns = statement.getColumnNames()
-    const values = []
-    while (statement.step()) values.push(statement.get())
-    if (columns.length) sets.push({ columns, values })
+  let statementNumber = 1
+  try {
+    for (const statement of db.iterateStatements(sql)) {
+      const columns = statement.getColumnNames()
+      const values = []
+      while (statement.step()) values.push(statement.get())
+      if (columns.length) sets.push({ columns, values, sql: statement.getSQL(), statementNumber })
+      statementNumber++
+    }
+  } catch (cause) {
+    const error = new Error(cause.message, { cause })
+    error.sets = sets
+    error.statementNumber = statementNumber
+    throw error
   }
   return sets
 }

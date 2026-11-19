@@ -85,3 +85,56 @@
   .intro-row { flex-wrap: wrap; }
   .workspace-actions { flex-wrap: wrap; }
 }
+
+.query-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.selection-button {
+  background: white;
+  border: 1px solid #b4c8ed;
+  border-radius: 8px;
+  color: #274f9e;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 10px 12px;
+  white-space: nowrap;
+}
+.selection-button:hover:enabled { background: #eaf1fc; }
+.executed-sql {
+  margin: 0 19px 14px;
+  color: #516784;
+  font-size: 13px;
+}
+.executed-sql summary { cursor: pointer; }
+.executed-sql pre {
+  padding: 12px;
+  background: #f5f8fc;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.keep-results, .result-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #516784;
+}
+.keep-results { cursor: pointer; }
+.keep-results input { accent-color: #3268e0; }
+.result-heading {
+  justify-content: space-between;
+  padding: 12px 19px 9px;
+}
+.result-heading h3 { font-size: 14px; color: #243955; margin: 0; }
+.query-result + .query-result { border-top: 2px solid #dbe5f1; }
+@media (max-width: 480px) {
+  .data-tabs { height: auto; min-height: 51px; flex-wrap: wrap; gap: 5px 12px; }
+  .data-tabs .tabs { min-height: 45px; }
+  .keep-results { padding: 6px 0; }
+}

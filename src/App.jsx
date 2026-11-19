@@ -39,18 +39,46 @@ function formatCell(value) {
   return String(value)
 }
 
+function rowCountLabel(count) {
+  return `${count} ${count === 1 ? 'row' : 'rows'}`
+}
+
+function ResultTable({ result, label }) {
+  return <section className="query-result" aria-label={label || 'Query result'}>
+    {label && <div className="result-heading">
+      <h3>{label}</h3>
+      <span>{rowCountLabel(result.values.length)}</span>
+    </div>}
+    {label && result.sql && <details className="executed-sql">
+      <summary>Show statement</summary>
+      <pre>{result.sql.trim()}</pre>
+    </details>}
+    <div className="results-scroll">
+      <table aria-label={label || 'Query result'}>
+        <thead><tr>{result.columns.map((column, i) => <th key={i}>{column}</th>)}</tr></thead>
+        <tbody>{result.values.map((row, i) => (
+          <tr key={i}>{row.map((cell, j) => <td key={j}>{formatCell(cell)}</td>)}</tr>
+        ))}</tbody>
+      </table>
+      {!result.values.length && <div className="empty-results">The query returned no rows.</div>}
+    </div>
+  </section>
+}
+
 export default function App() {
   const dbRef = useRef(null)
   const editorRef = useRef(null)
   const [ready, setReady] = useState(false)
   const [query, setQuery] = useState(initialQuery)
+  const [selectionSource, setSelectionSource] = useState(null)
   const [tables, setTables] = useState([])
   const [selectedTable, setSelectedTable] = useState('customers')
   const [builder, setBuilder] = useState(null)
   const [preferences, setPreferences] = useState(readPreferences)
   const [saved, setSaved] = useState(true)
   const [rowCount, setRowCount] = useState(25)
-  const [result, setResult] = useState(null)
+  const [results, setResults] = useState([])
+  const [keepResults, setKeepResults] = useState(false)
   const [message, setMessage] = useState(null)
   const [activeExample, setActiveExample] = useState(0)
   const [showReset, setShowReset] = useState(false)
@@ -75,30 +103,58 @@ export default function App() {
       setSelectedTable(first?.name || '')
       setQuery(first?.name === 'customers' ? initialQuery : previewSql(first?.name))
       setActiveExample(first?.name === 'customers' ? 0 : -1)
-      setResult(first ? previewTable(db, first.name) : null)
+      setResults(first ? [previewTable(db, first.name)] : [])
       setMessage({ type: 'success', text: 'Database ready', detail: first ? `Previewing ${first.name}.` : 'Create a table to start practicing.' })
       setReady(true)
     }).catch(error => setMessage({ type: 'error', text: 'Database could not load', detail: error.message }))
     return () => { mounted = false }
   }, [])
 
-  function execute() {
-    if (!dbRef.current || !query.trim()) return
+  function syncSelection(event) {
+    const { value, selectionStart, selectionEnd } = event.currentTarget
+    setSelectionSource(value.slice(selectionStart, selectionEnd).trim() ? value : null)
+  }
+
+  function showRun(sets) {
+    setResults(previous => {
+      const kept = keepResults ? previous.filter(result => result.runNumber) : []
+      const runNumber = (kept.at(-1)?.runNumber || 0) + 1
+      return [...kept, ...sets.map(result => ({ ...result, runNumber }))]
+    })
+    setPanel('results')
+  }
+
+  function execute(selectionOnly = false) {
+    const editor = editorRef.current
+    if (!ready || !editor) return
+    const { value, selectionStart, selectionEnd } = editor
+    const sql = selectionOnly ? value.slice(selectionStart, selectionEnd) : value
+    if (!sql.trim()) return
+    let scope
+    if (selectionOnly) {
+      const first = value.slice(0, selectionStart).split('\n').length
+      const last = first + sql.trimEnd().split('\n').length - 1
+      scope = first === last ? `line ${first}` : `lines ${first}–${last}`
+    }
+    const snippet = selectionOnly ? sql : undefined
     try {
-      const output = runQuery(dbRef.current, query)
+      const output = runQuery(dbRef.current, sql)
       refresh(dbRef.current)
-      const last = output.sets.at(-1) || null
-      setResult(last)
-      setPanel('results')
+      showRun(output.sets)
+      const totalRows = output.sets.reduce((sum, result) => sum + result.values.length, 0)
+      let summary = 'Statement completed'
+      if (output.sets.length === 1) summary = `${rowCountLabel(totalRows)} returned`
+      if (output.sets.length > 1) summary = `${output.sets.length} result sets · ${rowCountLabel(totalRows)} total`
       setMessage({
         type: 'success',
-        text: 'Query ran successfully',
-        detail: last ? `${last.values.length} ${last.values.length === 1 ? 'row' : 'rows'} returned · ${output.elapsed} ms` : `Statement completed · ${output.elapsed} ms`,
+        text: scope ? `Ran selection · ${scope}` : 'Query ran successfully',
+        snippet,
+        detail: `${summary} · ${output.elapsed} ms`,
       })
     } catch (error) {
-      setResult(null)
-      setPanel('results')
-      setMessage({ type: 'error', text: 'SQL error', detail: error.message })
+      showRun(error.sets || [])
+      const failed = error.statementNumber ? `Statement ${error.statementNumber} failed. ` : ''
+      setMessage({ type: 'error', text: scope ? `SQL error in selection · ${scope}` : 'SQL error', detail: failed + error.message, snippet })
       refresh(dbRef.current)
     }
   }
@@ -120,7 +176,7 @@ export default function App() {
     const next = { selectedTable: tableName, recipes }
     setPreferences(next)
     setSelectedTable(tableName)
-    setResult(previewTable(db, tableName))
+    setResults([previewTable(db, tableName)])
     if (created || query === initialQuery || !query.trim()) {
       setQuery(previewSql(tableName))
       setActiveExample(-1)
@@ -161,7 +217,7 @@ export default function App() {
     setPreferences({})
     localStorage.removeItem(preferencesKey)
     setSaved(true)
-    setResult(db.exec(initialQuery)[0] || null)
+    setResults(db.exec(initialQuery))
     setMessage({ type: 'success', text: 'Starter data restored', detail: 'Your saved database was replaced.' })
     setShowReset(false)
     setActiveExample(0)
@@ -177,7 +233,7 @@ export default function App() {
   function handleEditorKey(event) {
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
       event.preventDefault()
-      execute()
+      execute(event.shiftKey)
     }
     if (event.key === 'Tab') {
       event.preventDefault()
@@ -230,16 +286,43 @@ export default function App() {
                 <div className="editor-line" key={index} data-line={index + 1}>{line || '\u200b'}</div>
               ))}
             </div>
-            <textarea ref={editorRef} value={query} wrap="soft" onChange={event => { setQuery(event.target.value); setActiveExample(-1) }} onKeyDown={handleEditorKey} spellCheck="false" aria-label="SQL query" placeholder="SELECT * FROM customers;" />
+            <textarea ref={editorRef} value={query} wrap="soft" onChange={event => { setQuery(event.target.value); setActiveExample(-1) }} onSelect={syncSelection} onKeyDown={handleEditorKey} spellCheck="false" aria-label="SQL query" placeholder="SELECT * FROM customers;" />
           </div>
-          <div className="editor-footer"><span>Run any SQLite statement, including CREATE TABLE and INSERT.</span><button className="run-button" onClick={execute} disabled={!ready || !query.trim()}><Icon name="play" size={17} /> Run query <span className="shortcut">⌘ ↵</span></button></div>
+          <div className="editor-footer">
+            <span>Separate statements with semicolons to see each result. Highlight SQL to run a selection.</span>
+            <div className="query-actions">
+              <button className="selection-button" onClick={() => execute(true)} disabled={!ready || selectionSource !== query} title="Run highlighted SQL (Ctrl/⌘ + Shift + Enter)">Run selection</button>
+              <button className="run-button" onClick={() => execute()} disabled={!ready || !query.trim()}><Icon name="play" size={17} /> Run query <span className="shortcut">⌘ ↵</span></button>
+            </div>
+          </div>
         </section>
 
         <section className="data-card" aria-label="Results and schema">
-          <div className="data-tabs"><div className="tabs"><button className={panel === 'results' ? 'active' : ''} onClick={() => setPanel('results')}>Results</button><button className={panel === 'schema' ? 'active' : ''} onClick={() => setPanel('schema')}>Table structure</button></div>{panel === 'results' && result && <span className="row-summary">{result.values.length} {result.values.length === 1 ? 'row' : 'rows'}</span>}</div>
+          <div className="data-tabs">
+            <div className="tabs">
+              <button className={panel === 'results' ? 'active' : ''} onClick={() => setPanel('results')}>Results</button>
+              <button className={panel === 'schema' ? 'active' : ''} onClick={() => setPanel('schema')}>Table structure</button>
+            </div>
+            {panel === 'results' && <label className="keep-results">
+              <input type="checkbox" checked={keepResults} onChange={event => setKeepResults(event.target.checked)} />
+              Keep previous results
+            </label>}
+          </div>
           {panel === 'results' ? <>
             {message && <div className={`status-message ${message.type}`}><span className="status-icon"><Icon name={message.type === 'success' ? 'check' : 'close'} size={15} /></span><div><strong>{message.text}</strong><span>{message.detail}</span></div></div>}
-            {result ? <div className="results-scroll"><table><thead><tr>{result.columns.map((column, index) => <th key={`${column}-${index}`}>{column}</th>)}</tr></thead><tbody>{result.values.map((row, rowIndex) => <tr key={rowIndex}>{row.map((value, index) => <td key={index}>{formatCell(value)}</td>)}</tr>)}</tbody></table>{!result.values.length && <div className="empty-results">The query returned no rows.</div>}</div> : <div className="empty-results">Run a SELECT query to see rows here.</div>}
+            {message?.snippet && <details className="executed-sql" key={message.text + message.snippet}>
+              <summary>SQL from selection</summary>
+              <pre>{message.snippet}</pre>
+            </details>}
+            {results.map((result, i) => {
+              let label = ''
+              if (result.runNumber && (results.length > 1 || keepResults)) {
+                label = `Statement ${result.statementNumber}`
+                if (results.at(-1).runNumber > 1) label = `Run ${result.runNumber} · ${label}`
+              }
+              return <ResultTable key={i} result={result} label={label} />
+            })}
+            {!results.length && <div className="empty-results">Run a SELECT query to see rows here.</div>}
           </> : <div className="schema-content">{currentTable ? <><div className="schema-intro"><strong>{currentTable.name}</strong><span>{currentTable.count} rows · {currentTable.columns.length} columns</span></div><div className="schema-table"><div className="schema-head"><span>COLUMN</span><span>TYPE</span><span>KEY</span></div>{currentTable.columns.map(column => <div className="schema-row" key={column.name}><code>{column.name}</code><span>{column.type || 'ANY'}</span><span>{column.primaryKey ? 'Primary' : '—'}</span></div>)}</div></> : <div className="empty-results">Choose a table to view its columns.</div>}</div>}
         </section>
       </main>
